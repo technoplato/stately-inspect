@@ -16,6 +16,12 @@ const isDevMode = false;
 type SkyInspectorOptions = {
   apiKey?: string;
   onerror?: (error: Error) => void;
+  /**
+   * The session ID to use for the inspector.
+   *
+   * @default a random UUID
+   */
+  sessionId?: string;
 } & InspectorOptions & {
     inspectorType?: 'node' | 'browser';
     WebSocket?: typeof WebSocket;
@@ -39,8 +45,7 @@ export function createSkyInspector(
   };
   const server = apiBaseURL.replace('/api/sky', '');
   const { apiKey, onerror, ...inspectorOptions } = options;
-  // const sessionId = uuidv4();
-  const sessionId = 'learningtocodemakeslifeeasier';
+  const sessionId = options.sessionId ?? uuidv4();
   const room = `inspect-${sessionId}`;
   const defaultWS = isNode ? require('isomorphic-ws') : undefined;
   const liveInspectUrl = `${server}/inspect/${sessionId}`;
