@@ -5,23 +5,30 @@ import { createBrowserInspector } from './browser';
 import {
   InspectorOptions,
   createInspector as inspectCreator,
+  // Inspector,
 } from './createInspector';
 import { isNode } from './utils';
+import { Adapter, Inspector } from './types';
 
 // Not the most elegant way to do this, but it makes it much easier to test local changes
 const isDevMode = false;
 
 type SkyInspectorOptions = {
-  apiKey?: string; // Not used yet, will be used to add additional features later
+  apiKey?: string;
   onerror?: (error: Error) => void;
 } & InspectorOptions & {
-  inspectorType?: 'node' | 'browser';
-  WebSocket?: typeof WebSocket;
+    inspectorType?: 'node' | 'browser';
+    WebSocket?: typeof WebSocket;
+  };
+
+type SkyInspectorResult = {
+  connectToWebSocketServer: () => Promise<string>;
+  createInspector: () => Inspector<Adapter>;
 };
 
 export function createSkyInspector(
   options: SkyInspectorOptions = {}
-): ReturnType<typeof inspectCreator> {
+): SkyInspectorResult {
   const { host, apiBaseURL } = {
     host: isDevMode
       ? 'localhost:1999'
@@ -32,36 +39,67 @@ export function createSkyInspector(
   };
   const server = apiBaseURL.replace('/api/sky', '');
   const { apiKey, onerror, ...inspectorOptions } = options;
-  const sessionId = uuidv4(); // Generate a unique session ID
+  // const sessionId = uuidv4();
+  const sessionId = 'learningtocodemakeslifeeasier';
   const room = `inspect-${sessionId}`;
   const defaultWS = isNode ? require('isomorphic-ws') : undefined;
-  const socket = new PartySocket({
-    host,
-    room,
-    WebSocket: inspectorOptions?.WebSocket ?? defaultWS,
-  });
   const liveInspectUrl = `${server}/inspect/${sessionId}`;
-  socket.onerror = onerror ?? console.error;
-  socket.onopen = () => {
-    console.log('Connected to Sky, link to your live inspect session:');
-    console.log(liveInspectUrl);
+
+  let socket: PartySocket | null = null;
+
+  const connectToWebSocketServer = (): Promise<string> => {
+    return new Promise<string>((resolve, reject) => {
+      socket = new PartySocket({
+        host,
+        room,
+        WebSocket: inspectorOptions?.WebSocket ?? defaultWS,
+      });
+
+      socket.onerror = (error: Event) => {
+        if (onerror) {
+          onerror(new Error(error.type));
+        } else {
+          console.error(error);
+        }
+        reject(new Error(error.type));
+      };
+
+      socket.onopen = () => {
+        console.log('Connected to Sky, link to your live inspect session:');
+        console.log(liveInspectUrl);
+        resolve(liveInspectUrl);
+      };
+    });
   };
-  if (inspectorOptions?.inspectorType === 'node' || isNode) {
-    return inspectCreator({
-      ...inspectorOptions,
-      send(event) {
-        const skyEvent = apiKey ? { apiKey, ...event } : event;
-        socket.send(stringify(skyEvent));
-      },
-    });
-  } else {
-    return createBrowserInspector({
-      ...inspectorOptions,
-      url: liveInspectUrl,
-      send(event) {
-        const skyEvent = apiKey ? { apiKey, ...event } : event;
-        socket.send(stringify(skyEvent));
-      },
-    });
-  }
+
+  const createInspector = (): Inspector<Adapter> => {
+    if (!socket) {
+      throw new Error(
+        'WebSocket connection not established. Call connectToWebSocketServer first.'
+      );
+    }
+
+    const sendEvent = (event: any): void => {
+      const skyEvent = apiKey ? { apiKey, ...event } : event;
+      socket!.send(stringify(skyEvent));
+    };
+
+    if (inspectorOptions?.inspectorType === 'node' || isNode) {
+      return inspectCreator({
+        ...inspectorOptions,
+        send: sendEvent,
+      });
+    } else {
+      return createBrowserInspector({
+        ...inspectorOptions,
+        url: liveInspectUrl,
+        send: sendEvent,
+      });
+    }
+  };
+
+  return {
+    connectToWebSocketServer,
+    createInspector,
+  };
 }
